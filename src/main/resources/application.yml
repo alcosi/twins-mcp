@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: twins-mcp
+  main:
+    # twins-mcp is a stdio-only MCP server. No servlet container (Tomcat/Undertow/Jetty)
+    # should start; the JSON-RPC channel is stdin/stdout, not HTTP.
+    web-application-type: none
+    # Spring Boot's default banner writes to stdout, which would corrupt the JSON-RPC
+    # transport. Disable it entirely.
+    banner-mode: off
+
+# ARCH-5 env vars. Empty-string defaults make missing vars observable to JSR-380
+# (@NotBlank) in StartupEnvValidator — AC-2 fail-fast discipline.
+twins:
+  connection:
+    base-url: ${TWINS_BASE_URL:}
+    domain-id: ${TWINS_DOMAIN_ID:}
+  m2m:
+    client-id: ${TWINS_M2M_CLIENT_ID:}
+    client-secret: ${TWINS_M2M_CLIENT_SECRET:}
+    public-key-id: ${TWINS_M2M_PUBLIC_KEY_ID:}
+
+logging:
+  level:
+    root: INFO
+    org.twins.mcp: INFO
