@@ -2,6 +2,22 @@
 
 Track items surfaced during code review that are real but out of scope for the current story. Each entry: where it came from, what it is, why deferred.
 
+## Deferred from: code review of 1-3-logging-secrets-sanitiser (2026-07-13)
+
+- **`SanitisingLayout` exception fallback returns raw (unredacted) line** [`SanitisingLayout.java:48-49`] — on exception the catch returns `delegate.doLayout(event)` unsanitised. Currently unreachable (`SecretsSanitiser.sanitise()` catches `Throwable` internally), but it is the wrong default for a secrets chokepoint: any future change letting an exception escape would leak the line. Defense-in-depth — return `ERROR_TAG` to match `sanitise`'s own policy.
+- **`secretLiteral` matching recompiles Pattern per log line + `\E` fragility** [`SecretsSanitiser.java:153-155`] — `replaceLiteralIgnoreCase` builds `Pattern.compile(Pattern.quote(needle), …)` on every `sanitise()` call (hot path). `Pattern.quote` does not escape an embedded `\E`, so a secret containing the literal sequence `\E` either throws `PatternSyntaxException` (→ entire line replaced by `ERROR_TAG`, content lost) or silently mis-matches (→ secret leaks unredacted). Cache a compiled Pattern at `setSecretLiteral`, or switch to a non-regex literal `indexOf` scan.
+- **`immediateFlush=true` + no AsyncAppender** [`logback-spring.xml:17`] — the 1.1 review deferred this expecting "Story 1.3 will add full JSON encoder + SecretsSanitiser + AsyncAppender". 1.3 added the JSON encoder + SanitisingLayout but NOT an AsyncAppender, and synchronous flush remains. Likely acceptable for a low-volume stdio server; re-defer until a load test shows transport-thread contention.
+- **Secret literal registered only at `ApplicationStartedEvent`** [`LoggingConfig.java:30-36`] — bootstrap logs emitted before that event are not redacted against the secret. Narrow window (Spring does not log env values; `StartupEnvValidator` avoids echoing the secret) and matches spec T1.4. Harden later by registering in a `@PostConstruct` / `EnvironmentPostProcessor`.
+- **`clearForTest()` is public on a production singleton** [`SecretsSanitiser.java:94`] — callable from production code (would disable redaction; does not leak, but wrong API surface). Make package-private or guard behind a flag.
+
+### In-scope candidate (NOT deferred — decision pending)
+
+- _(Resolved 2026-07-13 in Story 1.3)_ Bearer `\S+` JSON-structure corruption — fixed: `BEARER` narrowed to `[A-Za-z0-9._+/=-]+`; regression test `bearerDoesNotEatJsonDelimiters` added. See Story 1.3 Change Log.
+
+## Cross-story note (carry-over for Story 1.4 — TokenHolder)
+
+- **Dynamic-value registry grows unbounded across token rotations** [`SecretsSanitiser.java:79-85`] — `registerDynamic` dedups only by the NEW value; the previous token stays registered. If `TokenHolder` refreshes hourly without `unregisterDynamic(old)`, N tokens accumulate (slow memory growth; each still redacted = safe but wasteful). Story 1.4 should `unregisterDynamic(previousToken)` before `registerDynamic(newToken, "authtoken")`.
+
 ## Deferred from: code review of 1-2-connection-config-env-validator (2026-07-08)
 
 - **Integration test for non-zero exit code** [`StartupEnvValidatorTest`] — spec T4.2 only requires manual smoke (verified `EXIT=1` for missing-var and malformed-URL cases). Automated integration test via `SpringApplication.exit` would harden regression coverage but is not spec-required.

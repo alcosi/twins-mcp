@@ -8,6 +8,16 @@ spring:
     # Spring Boot's default banner writes to stdout, which would corrupt the JSON-RPC
     # transport. Disable it entirely.
     banner-mode: off
+  ai:
+    mcp:
+      server:
+        # Stdio transport: JSON-RPC over stdin/stdout (FR-TM-022, ARCH-SETUP-10).
+        # The spring-ai-starter-mcp-server auto-configures the McpSyncServer; McpServerConfig
+        # registers TwinsMcpTool beans as tool specifications via a McpSyncServerCustomizer.
+        stdio: true
+        type: SYNC
+        name: twins-mcp
+        version: 0.1.0
 
 # ARCH-5 env vars. Empty-string defaults make missing vars observable to JSR-380
 # (@NotBlank) in StartupEnvValidator — AC-2 fail-fast discipline.

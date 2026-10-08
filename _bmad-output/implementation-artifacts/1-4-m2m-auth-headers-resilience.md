@@ -1,6 +1,6 @@
 # Story 1.4: M2M Authentication, Headers Interceptor & Resilience
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -123,8 +123,47 @@ Verify DTO field names by reading the vendored `vendor/twins/` source or the Mav
 
 ### Agent Model Used
 
+Claude (twins-mcp / GLM-5.2)
+
 ### Debug Log References
+
+- `./gradlew compileJava` — BUILD SUCCESSFUL (Resilience4j 2.4.0 API + DTO field access verified).
+- `./gradlew test` — BUILD SUCCESSFUL, **78 tests, 0 failures, 0 skipped** (was 58; +20 for Story 1.4).
+  - TokenHolderTest: 7 · TwinsM2MClientTest: 9 · TwinsHeadersInterceptorTest: 4.
+- `./gradlew build` — BUILD SUCCESSFUL (bootJar produced).
 
 ### Completion Notes List
 
+- **AC-2 deviation (token expiry source), forced by the real DTO shape.** The artifact assumed an `expires_in` seconds field on `AuthM2MTokenRsDTOv1` (`setToken(token, expiresInSeconds)`, threshold `= now + (expires_in − 60) * 1000`). Verified against `twins-core-dto:1.4.191` (javap + vendored source): the response has only `Map<String,String> authData`. The token lives at `authData["auth_token"]`; the only expiry signal is `authData["auth_token_expires_at"]`, an **ISO-8601 absolute timestamp string** (e.g. `2026-07-13T10:52:56Z`) — there is **no** `expires_in`. `TwinsM2MClient.computeRefreshThreshold` parses that instant and applies the 60 s margin (`threshold = serverExpiry − 60 s`); `TokenHolder` stores the resulting absolute epoch-millis. AC-2's intent (cache + refresh 60 s before expiry) is preserved; only the signal source changed. When `auth_token_expires_at` is absent (Alcosi external IdP puts only `auth_token`) or unparseable, a 50 min fallback TTL is used; when already-expired (clock skew), a 5 s minimal TTL (the 401-replay path refreshes).
+- **Domain exceptions created now, not as placeholders.** T2.6/T-Notes suggested a throwaway `M2MAuthException` refactored by Story 1.6. Instead `error/TwinsPermissionDenied` and `error/TwinsUnavailable` (minimal `RuntimeException` subclasses) are introduced here — they are exactly what AC-3/AC-6 require. Story 1.6 will add `ErrorEnvelopeMapper` + `TwinsNotFound` + `ToolInputInvalid`; no refactor of these two needed.
+- **Header names verified.** `DomainId` / `AuthToken` confirmed against `vendor/twins/core/.../service/HttpRequestService.java:24-25` (`HEADER_AUTH_TOKEN="AuthToken"`, `HEADER_DOMAIN_ID="DomainId"`). Used as string literals in `TwinsHeadersInterceptor` (the constants live in the full twins app, not the DTO-only artifact).
+- **M2M call carries `DomainId`.** The endpoint is `@ParameterDomainHeader`-annotated (`DomainResolverHeaders` resolves the domain from it), so `TwinsM2MClient` sets `DomainId` explicitly on its POST. It does NOT set `AuthToken` (none exists yet) and does NOT use the headers interceptor.
+- **Two RestClient beans (AC-8, T5.4).** `m2mRestClient` (no interceptor, no retry) and `twinsRestClient` (carries `TwinsHeadersInterceptor`). Disambiguated at injection via `@Qualifier`. `ClientHttpRequestFactory` (SimpleClientHttpRequestFactory, 30 s connect+read) shared by both.
+- **401 single-replay lives inside the interceptor (AC-3), no loop-guard attribute.** `intercept()` performs original + replay within one invocation (`execution.execute()` is the terminal send, not a re-entry into the interceptor chain), so no request-attribute flag is needed. A second 401 raises `TwinsPermissionDenied`. Resilience4j Retry (in `TwinsRestClient`) operates one layer up and does not retry 4xx, so the two mechanisms compose cleanly.
+- **Resilience4j Retry, not TimeLimiter (deviation from T7.1).** `RetryConfig`: maxAttempts=3, exponential backoff 100 ms→200 ms (`IntervalFunction.ofExponentialBackoff(100ms, 2.0)`), retry predicate = `HttpServerErrorException` (5xx) OR `ResourceAccessException` (conn/IO); 4xx excluded. The 30 s per-attempt timeout is enforced at the HTTP layer via `SimpleClientHttpRequestFactory` (connect+read 30 s), NOT via `resilience4j-timelimiter`: TimeLimiter is async-oriented and cannot reliably interrupt a blocking sync RestClient call. Only `resilience4j-retry` was added (T7.1's `resilience4j-timelimiter` dep intentionally omitted — AC-6's 30 s budget is satisfied).
+- **Token-discipline (AC-7).** `TokenHolder.setToken` registers the live token with `SecretsSanitiser.registerDynamic(token, "authtoken")`; `invalidate` defensively leaves the prior value registered (it may be in flight in log buffers) and `setToken` unregisters the previously-registered value on replacement, keeping the dynamic registry bounded across rotations (resolves the cross-story note from the Story 1.3 review). Token never reaches `toString`/`equals`/exception messages; exception messages carry HTTP status + operation name only.
+- **publicKeyId** parsed `String → UUID` when `TWINS_M2M_PUBLIC_KEY_ID` is non-blank; omitted otherwise (DTO field is `UUID`, nullable).
+- **Context-load smoke deferred to Story 1.8.** Bean wiring is straightforward (explicit `@Qualifier`, no cycle); a full `@SpringBootTest` would also start the MCP stdio server and is better validated by the Testcontainers IT harness.
+
 ### File List
+
+- `gradle/libs.versions.toml` (modified — added `resilience4j = "2.4.0"` + `resilience4j-retry` library)
+- `build.gradle` (modified — added `implementation libs.resilience4j.retry`)
+- `src/main/java/org/twins/mcp/error/TwinsPermissionDenied.java` (new)
+- `src/main/java/org/twins/mcp/error/TwinsUnavailable.java` (new)
+- `src/main/java/org/twins/mcp/client/TokenHolder.java` (new)
+- `src/main/java/org/twins/mcp/client/TwinsM2MClient.java` (new)
+- `src/main/java/org/twins/mcp/client/TwinsHeadersInterceptor.java` (new)
+- `src/main/java/org/twins/mcp/client/TwinsRestClient.java` (new — façade)
+- `src/main/java/org/twins/mcp/config/ResilienceConfig.java` (new — Retry bean)
+- `src/main/java/org/twins/mcp/config/RestClientConfig.java` (new — two RestClient beans + request factory)
+- `src/test/java/org/twins/mcp/client/TokenHolderTest.java` (new — 7 tests)
+- `src/test/java/org/twins/mcp/client/TwinsM2MClientTest.java` (new — 9 tests)
+- `src/test/java/org/twins/mcp/client/TwinsHeadersInterceptorTest.java` (new — 4 tests)
+
+## Change Log
+
+| Date | Change |
+|---|---|
+| 2026-07-01 | Story created from Epic 1 breakdown (bmad-create-story) |
+| 2026-07-13 | Implementation: TokenHolder + TwinsM2MClient + TwinsHeadersInterceptor + TwinsRestClient + RestClientConfig + ResilienceConfig + TwinsPermissionDenied/TwinsUnavailable + 20 tests (78 total, 0 failures). Story 1.4 → done. Deviations from artifact: AC-2 token expiry read from `authData["auth_token_expires_at"]` ISO-8601 (no `expires_in` field); TimeLimiter replaced by request-factory timeout. |

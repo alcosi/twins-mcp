@@ -1,0 +1,46 @@
+plugins {
+    id 'java'
+    alias(libs.plugins.spring.boot)
+}
+
+group = 'org.twins.mcp'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(libs.versions.java.get())
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Spring Boot BOM manages all spring-* versions for the Boot-managed stack.
+    // Spring AI BOM layered on top for spring-ai-* versions.
+    implementation platform(libs.spring.boot.bom)
+    implementation platform(libs.spring.ai.bom)
+
+    implementation libs.spring.boot.starter
+    // RestClient carrier without the spring-boot-starter-web (Tomcat + MVC) stack —
+    // we are a stdio process; web-application-type: none. spring-web is enough.
+    implementation libs.spring.web
+    implementation libs.spring.boot.starter.validation
+    implementation libs.spring.ai.starter.mcp.server
+    implementation libs.twins.core.dto
+    // Structured JSON logging — Logback 1.5.x (Boot 4.1 default) has no built-in JSON encoder.
+    implementation libs.logstash.logback.encoder
+    // Retry policy for outbound twins REST calls (5xx + transient IO). ARCH-15.
+    implementation libs.resilience4j.retry
+
+    testImplementation libs.spring.boot.starter.test
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.named('bootJar') {
+    archiveBaseName = 'twins-mcp'
+    archiveVersion = project.version
+}

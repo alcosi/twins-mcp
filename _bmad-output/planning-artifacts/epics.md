@@ -10,8 +10,14 @@ references:
 project_name: 'twins-mcp'
 user_name: 'Nikita'
 date: '2026-07-01'
-epicsCompleted: [1]
-storiesCompleted: ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8']
+epicsCompleted: []
+storiesCompleted: ['1.1', '1.2', '1.3', '1.4', '1.5']
+storiesInReview: []
+storiesReadyForDev: ['1.6', '1.7', '1.8']
+# Reality check 2026-07-13: only stories 1.1–1.3 have code in src/ (verified via
+# source tree + test results + artifact Status). 1.1/1.2 Status=done; 1.3 Status=review
+# (code review logged in deferred-work.md); 1.4–1.8 Status=ready-for-dev (no code yet).
+# Epic 1 is NOT complete — do not treat it as such until 1.4–1.8 are implemented.
 ---
 
 # twins-mcp - Epic Breakdown

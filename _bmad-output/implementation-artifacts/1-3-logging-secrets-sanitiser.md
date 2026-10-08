@@ -4,7 +4,7 @@ baseline_commit: d9000c46686efaa32537739dd90b2f1e7fa5e742
 
 # Story 1.3: Structured Logging & Secrets Sanitiser
 
-Status: review
+Status: done
 
 ## Story
 
@@ -154,3 +154,4 @@ Claude (twins-mcp / GLM-5.2)
 |---|---|
 | 2026-07-01 | Story created from Epic 1 breakdown (bmad-create-story) |
 | 2026-07-09 | Implementation: SecretsSanitiser + SanitisingLayout + LoggingConfig + logstash-logback-encoder 9.0 + 23 new tests (Story 1.3 → review) |
+| 2026-07-13 | Code review fix: narrowed `BEARER` regex from `\S+` to a token char class `[A-Za-z0-9._+/=-]+` so it cannot swallow JSON structural delimiters (`"}`) and emit invalid JSON (NFR-TM-005). +1 regression test (`bearerDoesNotEatJsonDelimiters`); 58 tests, 0 failures. Story 1.3 → done. Review findings logged in `deferred-work.md`. |

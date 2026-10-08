@@ -1,6 +1,6 @@
 # Story 1.5: Tool Foundation — Registry, Allowlist, Validator, Response Pipeline
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -128,8 +128,53 @@ so that **adding a new tool is a small, well-defined task and every tool respons
 
 ### Agent Model Used
 
+Claude (twins-mcp / GLM-5.2)
+
 ### Debug Log References
+
+- `./gradlew compileJava` — BUILD SUCCESSFUL (no deprecation warnings; MCP SDK 2.0 + Spring AI 2.0 API verified via `javap`).
+- `./gradlew test` — BUILD SUCCESSFUL, **108 tests, 0 failures, 0 skipped** (was 78; +30 for Story 1.5):
+  - ToolRegistryAllowlistTest: 5 · ToolArgsValidatorTest: 7 · ToolJsonSchemaGeneratorTest: 4 · CursorCodecTest: 6 · SizeCapEnforcerTest: 4 · ToolResponseBuilderTest: 4.
+- `./gradlew build` — BUILD SUCCESSFUL (bootJar produced).
+- `./gradlew bootRun </dev/null` (env vars set, dummy twins URL) — exit 0: "Started Application in 19.9s", `McpServerAutoConfiguration` enabled tools/resources/prompts/completions, stdio transport wired, customizer bean created. Confirms MCP server boots over stdio with the bridge present.
 
 ### Completion Notes List
 
+- **Programmatic MCP bridge via `McpSyncServerCustomizer`, not `@McpTool` annotations (AC-8).** The annotation scanner would let a stray `@McpTool` register with MCP bypassing the `ToolKey` allowlist. Instead `McpServerConfig` exposes a single `McpSyncServerCustomizer` that builds one `McpServerFeatures.SyncToolSpecification` per registered `TwinsMcpTool` (tool name = `ToolKey.wireName()`, input schema from `ToolJsonSchemaGenerator`, call handler = deserialise → `ToolArgsValidator.validate` → `call` → `ToolResponse` → `CallToolResult`). Verified the auto-config consumes it: `McpServerAutoConfiguration.mcpSyncServer(...)` declares `Optional<McpSyncServerCustomizer>` and applies it via `lambda$mcpSyncServer$2(spec, customizer)`. `spring-ai-starter-mcp-server` builds the `McpSyncServer` + `StdioServerTransportProvider` itself; `application.yml` sets `spring.ai.mcp.server.{stdio=true, type=SYNC, name, version}`.
+- **Jackson 3 (Boot 4.1), not Jackson 2.** Boot 4.1 ships `tools.jackson.core:jackson-databind:3.1.4` (package `tools.jackson.*`); `com.fasterxml.jackson` is absent. `CursorCodec`, `ToolResponseBuilder`, and `McpServerConfig` use `tools.jackson.databind.ObjectMapper`; `JacksonException` is unchecked (`extends RuntimeException`) — caught explicitly where needed. `convertValue(map, Class)` throws `IllegalArgumentException` on malformed input.
+- **JSON schema reads JSR-380 from record fields, not `RecordComponent` (AC-3 wiring).** Jakarta validation annotations have no `RECORD_COMPONENT` target, so the compiler records them on the backing field/accessor; `RecordComponent.getAnnotation(...)` returns null. `ToolJsonSchemaGenerator` reads `argsType.getDeclaredField(name).getAnnotation(...)`. Translates `@NotBlank/@NotNull/@NotEmpty` → required, `@Size` → minLength/maxLength, `@Min/@Max` → minimum/maximum, `@Pattern` → pattern.
+- **AC-2 read-only gate (ARCH-9).** `key()` is typed to `ToolKey`, so a value outside the enum is structurally impossible at compile time; the runtime `ToolAllowlist` is defense-in-depth — it fails fast on a null key or a key outside the active allowed set (default `EnumSet.allOf(ToolKey)`, overridable via a package-private constructor for tests). `ToolRegistry` additionally rejects duplicate keys.
+- **Page-size constraints (AC-7)** are JSR-380 facets on each tool's `Args` (`@Min(1) @Max(100) Integer pageSize`), enforced by the single `ToolArgsValidator` hook — verified with `pageSize` 0/200/null.
+- **32 KiB cap (AC-5)** enforced hard by `SizeCapEnforcer` inside `ToolResponseBuilder.build()` — an over-cap response throws `IllegalStateException` (never silently truncated), regardless of cursor. The markdown "≤30 % of structured JSON / 5–30 lines" rule (AC-4) is a `MarkdownSummariser` authoring guideline, not a builder assertion (only the hard byte cap is asserted).
+- **Cursor (AC-6)**: base64url JSON `{page, pageSize, filterHash=SHA-256(filter)}`; `verifyFilter` rejects a cursor replayed against a changed filter with `ToolInputInvalid`.
+- **No full `@SpringBootTest`.** MCP wiring verified via `bootRun` smoke (server boots, capabilities enabled) + `javap` of the auto-config (customizer is consumed). End-to-end dispatch (a real tool over stdio) is validated in Story 1.7 (`list_classes`) and Story 1.8 (Testcontainers IT).
+
 ### File List
+
+- `src/main/resources/application.yml` (modified — `spring.ai.mcp.server.{stdio,type,name,version}`)
+- `src/main/java/org/twins/mcp/tool/ToolKey.java` (new — allowlist enum)
+- `src/main/java/org/twins/mcp/tool/TwinsMcpTool.java` (new — domain tool interface)
+- `src/main/java/org/twins/mcp/tool/ToolRegistry.java` (new — AC-1 discovery)
+- `src/main/java/org/twins/mcp/tool/ToolAllowlist.java` (new — AC-2 gate)
+- `src/main/java/org/twins/mcp/tool/ToolArgsValidator.java` (new — AC-3/AC-7)
+- `src/main/java/org/twins/mcp/tool/ToolJsonSchemaGenerator.java` (new — Args → JSON schema)
+- `src/main/java/org/twins/mcp/response/ToolResponse.java` (new — hybrid response record)
+- `src/main/java/org/twins/mcp/response/ToolResponseBuilder.java` (new — AC-4/AC-5)
+- `src/main/java/org/twins/mcp/response/CursorCodec.java` (new — AC-6)
+- `src/main/java/org/twins/mcp/response/SizeCapEnforcer.java` (new — 32 KiB)
+- `src/main/java/org/twins/mcp/response/MarkdownSummariser.java` (new — table/hint helpers)
+- `src/main/java/org/twins/mcp/error/ToolInputInvalid.java` (new)
+- `src/main/java/org/twins/mcp/config/McpServerConfig.java` (new — AC-8 bridge)
+- `src/test/java/org/twins/mcp/tool/ToolRegistryAllowlistTest.java` (new — 5 tests)
+- `src/test/java/org/twins/mcp/tool/ToolArgsValidatorTest.java` (new — 7 tests)
+- `src/test/java/org/twins/mcp/tool/ToolJsonSchemaGeneratorTest.java` (new — 4 tests)
+- `src/test/java/org/twins/mcp/response/CursorCodecTest.java` (new — 6 tests)
+- `src/test/java/org/twins/mcp/response/SizeCapEnforcerTest.java` (new — 4 tests)
+- `src/test/java/org/twins/mcp/response/ToolResponseBuilderTest.java` (new — 4 tests)
+
+## Change Log
+
+| Date | Change |
+|---|---|
+| 2026-07-01 | Story created from Epic 1 breakdown (bmad-create-story) |
+| 2026-07-15 | Implementation: TwinsMcpTool + ToolKey + ToolRegistry + ToolAllowlist + ToolArgsValidator + ToolJsonSchemaGenerator + ToolResponse/Builder + CursorCodec + SizeCapEnforcer + MarkdownSummariser + ToolInputInvalid + McpServerConfig + 30 tests (108 total, 0 failures). Story 1.5 → done. MCP bridge via `McpSyncServerCustomizer` (programmatic, allowlist-authoritative); Jackson 3 (`tools.jackson`); MCP stdio verified via bootRun smoke + javap of the auto-config. |

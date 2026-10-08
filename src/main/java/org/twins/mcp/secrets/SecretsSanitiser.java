@@ -43,8 +43,15 @@ public final class SecretsSanitiser {
     /** Minimum total length for a 3-segment dotted string to count as a JWT (AC-2). */
     private static final int JWT_MIN_TOTAL_LENGTH = 32;
 
-    /** {@code Bearer <token>} prefix, case-insensitive. Captures the token along with the prefix. */
-    private static final Pattern BEARER = Pattern.compile("(?i)Bearer\\s+\\S+");
+    /**
+     * {@code Bearer <token>} prefix, case-insensitive. The token class is restricted to characters
+     * that legitimately occur in bearer tokens (base64url, base64, hex, dots/dashes) so that the
+     * match CANNOT run past a JSON structural delimiter. The previous {@code \S+} greedy match ate
+     * the closing {@code "} and {@code }} of a compact JSON log line, emitting invalid JSON
+     * (NFR-TM-005 violation). Excluded delimiters: {@code " \ { } [ ] , :} and whitespace. An exotic
+     * token char outside this class is under-redacted (safe direction); structural corruption is not.
+     */
+    private static final Pattern BEARER = Pattern.compile("(?i)Bearer\\s+[A-Za-z0-9._+/=-]+");
 
     /**
      * Standalone base64 blob — ≥ 32 chars of base64 content followed by 0-2 {@code =} padding
